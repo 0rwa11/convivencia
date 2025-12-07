@@ -1,13 +1,5 @@
-/* Hide the 404 error number and red icon */
-.text-red-600,
-.text-destructive,
-[class*="text-red"],
-svg.text-red-600,
-svg.text-destructive,
-.w-12.h-12.text-red-600,
-.w-12.h-12.text-destructive,
-.rounded-full.text-red-600,
-.rounded-full.text-destructive {
+/* Hide all SVG elements (the red icon) */
+svg {
   display: none !important;
   visibility: hidden !important;
   width: 0 !important;
@@ -16,7 +8,43 @@ svg.text-destructive,
   padding: 0 !important;
 }
 
-/* Hide any element containing "404" text */
-:has(> :contains("404")) {
+/* Hide all heading elements (contains the 404 text) */
+h1, h2, h3, h4, h5, h6 {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  height: 0 !important;
+  visibility: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide elements with red text color */
+.text-red-600,
+.text-red-500,
+.text-red-700,
+.text-destructive,
+[class*="text-red"],
+[style*="color: red"],
+[style*="color: rgb(220"],
+[style*="color: #ff"] {
   display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide the pink/red background circle */
+.bg-red-50,
+.bg-red-100,
+.bg-destructive,
+[style*="background-color: rgb(254"],
+[style*="background: rgb(254"] {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }

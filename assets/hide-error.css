@@ -1,0 +1,22 @@
+/* Hide the 404 error number and red icon */
+.text-red-600,
+.text-destructive,
+[class*="text-red"],
+svg.text-red-600,
+svg.text-destructive,
+.w-12.h-12.text-red-600,
+.w-12.h-12.text-destructive,
+.rounded-full.text-red-600,
+.rounded-full.text-destructive {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide any element containing "404" text */
+:has(> :contains("404")) {
+  display: none !important;
+}

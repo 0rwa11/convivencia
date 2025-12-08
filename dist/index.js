@@ -111,7 +111,7 @@ function registerOAuthRoutes(app) {
 init_auth();
 
 // server/db.ts
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 
 // drizzle/schema.ts
@@ -219,7 +219,10 @@ async function createUser(user) {
     throw new Error("Database not available");
   }
   try {
-    await db.insert(users).values(user);
+    const result = await db.insert(users).values(user);
+    const userId = result[0].insertId;
+    const created = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    return created[0];
   } catch (error) {
     console.error("[Database] Failed to create user:", error);
     throw error;
@@ -252,6 +255,76 @@ async function updateUserLastSignedIn(userId) {
     await db.update(users).set({ lastSignedIn: /* @__PURE__ */ new Date() }).where(eq(users.id, userId));
   } catch (error) {
     console.error("[Database] Failed to update last signed in:", error);
+    throw error;
+  }
+}
+async function getAllUsers() {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+  try {
+    return await db.select().from(users);
+  } catch (error) {
+    console.error("[Database] Failed to get all users:", error);
+    throw error;
+  }
+}
+async function updateUser(id, updates) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+  try {
+    await db.update(users).set(updates).where(eq(users.id, id));
+    return await getUserById(id);
+  } catch (error) {
+    console.error("[Database] Failed to update user:", error);
+    throw error;
+  }
+}
+async function deleteUser(id) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+  try {
+    await db.delete(users).where(eq(users.id, id));
+  } catch (error) {
+    console.error("[Database] Failed to delete user:", error);
+    throw error;
+  }
+}
+async function getAuditLogs(limit = 100, offset = 0) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+  try {
+    return await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit).offset(offset);
+  } catch (error) {
+    console.error("[Database] Failed to get audit logs:", error);
+    throw error;
+  }
+}
+async function getSystemStatistics() {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+  try {
+    const allUsers = await db.select().from(users);
+    const allEvaluations = await db.select().from(evaluations);
+    const allGroups = await db.select().from(groups);
+    const allSessions = await db.select().from(sessions);
+    return {
+      totalUsers: allUsers.length,
+      totalEvaluations: allEvaluations.length,
+      totalGroups: allGroups.length,
+      totalSessions: allSessions.length
+    };
+  } catch (error) {
+    console.error("[Database] Failed to get statistics:", error);
     throw error;
   }
 }
@@ -353,6 +426,18 @@ async function getEvaluationsBySessionId(sessionId) {
     return await db.select().from(evaluations).where(eq(evaluations.sessionId, sessionId));
   } catch (error) {
     console.error("[Database] Failed to get evaluations:", error);
+    throw error;
+  }
+}
+async function listEvaluations() {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+  try {
+    return await db.select().from(evaluations);
+  } catch (error) {
+    console.error("[Database] Failed to list evaluations:", error);
     throw error;
   }
 }
@@ -589,8 +674,8 @@ function registerAuthRoutes(app) {
 }
 
 // server/routers.ts
-import { z as z2 } from "zod";
-import { TRPCError as TRPCError3 } from "@trpc/server";
+import { z as z5 } from "zod";
+import { TRPCError as TRPCError6 } from "@trpc/server";
 
 // server/_core/systemRouter.ts
 import { z } from "zod";
@@ -736,9 +821,631 @@ var systemRouter = router({
   })
 });
 
+// server/routers/admin.ts
+import { z as z2 } from "zod";
+import { TRPCError as TRPCError3 } from "@trpc/server";
+init_auth();
+var adminRouter = router({
+  /**
+   * List all users (admin only)
+   */
+  listUsers: protectedProcedure.query(async ({ ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      return await getAllUsers();
+    } catch (error) {
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch users"
+      });
+    }
+  }),
+  /**
+   * Get user by ID (admin only)
+   */
+  getUser: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      return await getUserById(input.id);
+    } catch (error) {
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch user"
+      });
+    }
+  }),
+  /**
+   * Create a new user (admin only)
+   */
+  createUser: protectedProcedure.input(
+    z2.object({
+      username: z2.string().min(3, "Username must be at least 3 characters"),
+      password: z2.string().min(6, "Password must be at least 6 characters"),
+      name: z2.string().optional(),
+      email: z2.string().email().optional(),
+      role: z2.enum(["admin", "facilitator", "user"]).default("user")
+    })
+  ).mutation(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      const existingUser = await getUserByUsername(input.username);
+      if (existingUser) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Username already exists"
+        });
+      }
+      const passwordHash = await hashPassword(input.password);
+      const user = await createUser({
+        username: input.username,
+        passwordHash,
+        name: input.name,
+        email: input.email,
+        role: input.role,
+        isActive: true
+      });
+      return user;
+    } catch (error) {
+      if (error.code) throw error;
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to create user"
+      });
+    }
+  }),
+  /**
+   * Update user (admin only)
+   */
+  updateUser: protectedProcedure.input(
+    z2.object({
+      id: z2.number(),
+      name: z2.string().optional(),
+      email: z2.string().email().optional(),
+      role: z2.enum(["admin", "facilitator", "user"]).optional(),
+      isActive: z2.boolean().optional()
+    })
+  ).mutation(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      return await updateUser(input.id, {
+        name: input.name,
+        email: input.email,
+        role: input.role,
+        isActive: input.isActive
+      });
+    } catch (error) {
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to update user"
+      });
+    }
+  }),
+  /**
+   * Reset user password (admin only)
+   */
+  resetPassword: protectedProcedure.input(
+    z2.object({
+      userId: z2.number(),
+      newPassword: z2.string().min(6, "Password must be at least 6 characters")
+    })
+  ).mutation(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      const passwordHash = await hashPassword(input.newPassword);
+      await updateUser(input.userId, { passwordHash });
+      return { success: true };
+    } catch (error) {
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to reset password"
+      });
+    }
+  }),
+  /**
+   * Delete user (admin only)
+   */
+  deleteUser: protectedProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      if (input.id === ctx.user?.id) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Cannot delete your own account"
+        });
+      }
+      await deleteUser(input.id);
+      return { success: true };
+    } catch (error) {
+      if (error.code) throw error;
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to delete user"
+      });
+    }
+  }),
+  /**
+   * Get audit logs (admin only)
+   */
+  getAuditLogs: protectedProcedure.input(
+    z2.object({
+      limit: z2.number().default(100),
+      offset: z2.number().default(0)
+    })
+  ).query(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      return await getAuditLogs(input.limit, input.offset);
+    } catch (error) {
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch audit logs"
+      });
+    }
+  }),
+  /**
+   * Get system statistics (admin only)
+   */
+  getStatistics: protectedProcedure.query(async ({ ctx }) => {
+    if (ctx.user?.role !== "admin") {
+      throw new TRPCError3({ code: "FORBIDDEN" });
+    }
+    try {
+      const stats = await getSystemStatistics();
+      return stats;
+    } catch (error) {
+      throw new TRPCError3({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch statistics"
+      });
+    }
+  })
+});
+
+// server/routers/analytics.ts
+import { z as z3 } from "zod";
+import { TRPCError as TRPCError4 } from "@trpc/server";
+var analyticsRouter = router({
+  /**
+   * Get evaluation statistics
+   */
+  getEvaluationStats: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      const evaluations2 = await listEvaluations();
+      if (!evaluations2 || evaluations2.length === 0) {
+        return {
+          totalEvaluations: 0,
+          averageScore: 0,
+          highestScore: 0,
+          lowestScore: 0,
+          byGroup: [],
+          bySession: [],
+          trend: []
+        };
+      }
+      const scores = evaluations2.map((e) => e.afterMixedInteractions || 0);
+      const totalEvaluations = evaluations2.length;
+      const averageScore = scores.reduce((a, b) => a + b, 0) / totalEvaluations;
+      const highestScore = Math.max(...scores);
+      const lowestScore = Math.min(...scores);
+      const byGroup = {};
+      evaluations2.forEach((e) => {
+        if (!byGroup[e.groupId]) {
+          byGroup[e.groupId] = { groupId: e.groupId, count: 0, averageScore: 0 };
+        }
+        byGroup[e.groupId].count += 1;
+        byGroup[e.groupId].averageScore += e.afterMixedInteractions || 0;
+      });
+      Object.keys(byGroup).forEach((key) => {
+        byGroup[key].averageScore = byGroup[key].averageScore / byGroup[key].count;
+      });
+      const bySession = {};
+      evaluations2.forEach((e) => {
+        if (!bySession[e.sessionId]) {
+          bySession[e.sessionId] = { sessionId: e.sessionId, count: 0, averageScore: 0 };
+        }
+        bySession[e.sessionId].count += 1;
+        bySession[e.sessionId].averageScore += e.afterMixedInteractions || 0;
+      });
+      Object.keys(bySession).forEach((key) => {
+        bySession[key].averageScore = bySession[key].averageScore / bySession[key].count;
+      });
+      return {
+        totalEvaluations,
+        averageScore: Math.round(averageScore * 100) / 100,
+        highestScore,
+        lowestScore,
+        byGroup: Object.values(byGroup),
+        bySession: Object.values(bySession),
+        trend: evaluations2.map((e) => ({
+          date: e.createdAt,
+          score: e.afterMixedInteractions
+        }))
+      };
+    } catch (error) {
+      throw new TRPCError4({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch evaluation statistics"
+      });
+    }
+  }),
+  /**
+   * Get group comparison data
+   */
+  getGroupComparison: protectedProcedure.input(z3.object({ groupIds: z3.array(z3.number()).optional() })).query(async ({ input, ctx }) => {
+    try {
+      const evaluations2 = await listEvaluations();
+      if (!evaluations2 || evaluations2.length === 0) {
+        return [];
+      }
+      const filtered = input.groupIds ? evaluations2.filter((e) => input.groupIds.includes(e.groupId)) : evaluations2;
+      const comparison = {};
+      filtered.forEach((e) => {
+        if (!comparison[e.groupId]) {
+          comparison[e.groupId] = {
+            groupId: e.groupId,
+            totalEvaluations: 0,
+            averageScore: 0,
+            participantCount: 0,
+            scoreDistribution: {}
+          };
+        }
+        comparison[e.groupId].totalEvaluations += 1;
+        comparison[e.groupId].averageScore += e.afterMixedInteractions || 0;
+        const scoreRange = Math.floor((e.afterMixedInteractions || 0) / 10) * 10;
+        const key = `${scoreRange}-${scoreRange + 10}`;
+        comparison[e.groupId].scoreDistribution[key] = (comparison[e.groupId].scoreDistribution[key] || 0) + 1;
+      });
+      Object.keys(comparison).forEach((key) => {
+        const group = comparison[key];
+        group.averageScore = Math.round(group.averageScore / group.totalEvaluations * 100) / 100;
+        group.participantCount = group.totalEvaluations;
+      });
+      return Object.values(comparison);
+    } catch (error) {
+      throw new TRPCError4({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch group comparison"
+      });
+    }
+  }),
+  /**
+   * Get trend analysis
+   */
+  getTrendAnalysis: protectedProcedure.input(
+    z3.object({
+      days: z3.number().default(30)
+    })
+  ).query(async ({ input, ctx }) => {
+    try {
+      const evaluations2 = await listEvaluations();
+      if (!evaluations2 || evaluations2.length === 0) {
+        return [];
+      }
+      const now = /* @__PURE__ */ new Date();
+      const startDate = new Date(now.getTime() - input.days * 24 * 60 * 60 * 1e3);
+      const filtered = evaluations2.filter((e) => new Date(e.createdAt) >= startDate);
+      const trend = {};
+      filtered.forEach((e) => {
+        const date = new Date(e.createdAt).toISOString().split("T")[0];
+        if (!trend[date]) {
+          trend[date] = { date, count: 0, averageScore: 0 };
+        }
+        trend[date].count += 1;
+        trend[date].averageScore += e.afterMixedInteractions || 0;
+      });
+      Object.keys(trend).forEach((key) => {
+        trend[key].averageScore = Math.round(trend[key].averageScore / trend[key].count * 100) / 100;
+      });
+      return Object.values(trend).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    } catch (error) {
+      throw new TRPCError4({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to fetch trend analysis"
+      });
+    }
+  }),
+  /**
+   * Generate summary report
+   */
+  generateSummaryReport: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      const stats = await getSystemStatistics();
+      const evaluations2 = await listEvaluations();
+      const scores = evaluations2.map((e) => e.afterMixedInteractions || 0);
+      const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+      return {
+        generatedAt: /* @__PURE__ */ new Date(),
+        period: "All Time",
+        summary: {
+          totalUsers: stats.totalUsers,
+          totalEvaluations: stats.totalEvaluations,
+          totalGroups: stats.totalGroups,
+          totalSessions: stats.totalSessions,
+          averageEvaluationScore: Math.round(averageScore * 100) / 100
+        },
+        keyMetrics: {
+          evaluationsPerSession: stats.totalSessions > 0 ? Math.round(stats.totalEvaluations / stats.totalSessions * 100) / 100 : 0,
+          evaluationsPerGroup: stats.totalGroups > 0 ? Math.round(stats.totalEvaluations / stats.totalGroups * 100) / 100 : 0,
+          usersPerGroup: stats.totalGroups > 0 ? Math.round(stats.totalUsers / stats.totalGroups * 100) / 100 : 0
+        }
+      };
+    } catch (error) {
+      throw new TRPCError4({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to generate summary report"
+      });
+    }
+  })
+});
+
+// server/routers/dataManagement.ts
+import { z as z4 } from "zod";
+import { TRPCError as TRPCError5 } from "@trpc/server";
+var dataManagementRouter = router({
+  /**
+   * Export all evaluations as JSON
+   */
+  exportEvaluationsJSON: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      const evaluations2 = await listEvaluations();
+      const groups2 = await getGroups();
+      const sessions2 = await getSessionsByGroupId(groups2[0]?.id || 0);
+      return {
+        exportedAt: /* @__PURE__ */ new Date(),
+        exportedBy: ctx.user?.username,
+        data: {
+          evaluations: evaluations2,
+          groups: groups2,
+          sessions: sessions2
+        }
+      };
+    } catch (error) {
+      throw new TRPCError5({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to export evaluations"
+      });
+    }
+  }),
+  /**
+   * Export evaluations as CSV
+   */
+  exportEvaluationsCSV: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      const evaluations2 = await listEvaluations();
+      const headers = [
+        "ID",
+        "Session ID",
+        "Group ID",
+        "User ID",
+        "Date",
+        "During Participation",
+        "Before Mixed Interactions",
+        "After Mixed Interactions",
+        "Before Stereotypes",
+        "After Stereotypes",
+        "Notes",
+        "Created At"
+      ];
+      const rows = evaluations2.map((e) => [
+        e.id,
+        e.sessionId,
+        e.groupId,
+        e.userId,
+        e.date,
+        e.duringParticipation,
+        e.beforeMixedInteractions,
+        e.afterMixedInteractions,
+        e.beforeStereotypes,
+        e.afterStereotypes,
+        e.notes,
+        e.createdAt
+      ]);
+      const csv = [headers, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(",")).join("\n");
+      return {
+        csv,
+        filename: `evaluations-${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.csv`
+      };
+    } catch (error) {
+      throw new TRPCError5({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to export evaluations as CSV"
+      });
+    }
+  }),
+  /**
+   * Import evaluations from JSON
+   */
+  importEvaluationsJSON: protectedProcedure.input(
+    z4.object({
+      data: z4.object({
+        evaluations: z4.array(
+          z4.object({
+            sessionId: z4.number(),
+            groupId: z4.number(),
+            userId: z4.number(),
+            duringParticipation: z4.string().optional(),
+            beforeMixedInteractions: z4.number().optional(),
+            afterMixedInteractions: z4.number().optional(),
+            beforeStereotypes: z4.string().optional(),
+            afterStereotypes: z4.string().optional(),
+            notes: z4.string().optional()
+          })
+        )
+      })
+    })
+  ).mutation(async ({ input, ctx }) => {
+    try {
+      if (ctx.user?.role !== "admin") {
+        throw new TRPCError5({
+          code: "FORBIDDEN",
+          message: "Only admins can import data"
+        });
+      }
+      let importedCount = 0;
+      const errors = [];
+      for (const evalData of input.data.evaluations) {
+        try {
+          await createEvaluation({
+            sessionId: evalData.sessionId,
+            groupId: evalData.groupId,
+            userId: evalData.userId,
+            duringParticipation: evalData.duringParticipation,
+            beforeMixedInteractions: evalData.beforeMixedInteractions,
+            afterMixedInteractions: evalData.afterMixedInteractions,
+            beforeStereotypes: evalData.beforeStereotypes,
+            afterStereotypes: evalData.afterStereotypes,
+            notes: evalData.notes
+          });
+          importedCount++;
+        } catch (error) {
+          errors.push(`Failed to import evaluation: ${error.message}`);
+        }
+      }
+      return {
+        success: true,
+        importedCount,
+        errors,
+        totalAttempted: input.data.evaluations.length
+      };
+    } catch (error) {
+      throw new TRPCError5({
+        code: "INTERNAL_SERVER_ERROR",
+        message: error.message || "Failed to import evaluations"
+      });
+    }
+  }),
+  /**
+   * Backup all data
+   */
+  backupAllData: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      if (ctx.user?.role !== "admin") {
+        throw new TRPCError5({
+          code: "FORBIDDEN",
+          message: "Only admins can backup data"
+        });
+      }
+      const users2 = await getAllUsers();
+      const groups2 = await getGroups();
+      const evaluations2 = await listEvaluations();
+      const auditLogs2 = await getAuditLogs(1e3, 0);
+      return {
+        backupDate: /* @__PURE__ */ new Date(),
+        backupBy: ctx.user?.username,
+        data: {
+          users: users2.map((u) => ({
+            id: u.id,
+            username: u.username,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            isActive: u.isActive,
+            createdAt: u.createdAt
+          })),
+          groups: groups2,
+          evaluations: evaluations2,
+          auditLogs: auditLogs2
+        },
+        statistics: {
+          totalUsers: users2.length,
+          totalGroups: groups2.length,
+          totalEvaluations: evaluations2.length,
+          totalAuditLogs: auditLogs2.length
+        }
+      };
+    } catch (error) {
+      throw new TRPCError5({
+        code: "INTERNAL_SERVER_ERROR",
+        message: error.message || "Failed to backup data"
+      });
+    }
+  }),
+  /**
+   * Restore data from backup
+   */
+  restoreFromBackup: protectedProcedure.input(
+    z4.object({
+      backupData: z4.any()
+    })
+  ).mutation(async ({ input, ctx }) => {
+    try {
+      if (ctx.user?.role !== "admin") {
+        throw new TRPCError5({
+          code: "FORBIDDEN",
+          message: "Only admins can restore data"
+        });
+      }
+      let restoredCount = 0;
+      const errors = [];
+      if (input.backupData.data?.groups) {
+        for (const group of input.backupData.data.groups) {
+          try {
+            await createGroup({
+              name: group.name,
+              description: group.description,
+              createdBy: ctx.user?.id || 1
+            });
+            restoredCount++;
+          } catch (error) {
+            errors.push(`Failed to restore group: ${error.message}`);
+          }
+        }
+      }
+      if (input.backupData.data?.evaluations) {
+        for (const evaluation of input.backupData.data.evaluations) {
+          try {
+            await createEvaluation({
+              sessionId: evaluation.sessionId,
+              groupId: evaluation.groupId,
+              userId: evaluation.userId,
+              duringParticipation: evaluation.duringParticipation,
+              beforeMixedInteractions: evaluation.beforeMixedInteractions,
+              afterMixedInteractions: evaluation.afterMixedInteractions,
+              beforeStereotypes: evaluation.beforeStereotypes,
+              afterStereotypes: evaluation.afterStereotypes,
+              notes: evaluation.notes
+            });
+            restoredCount++;
+          } catch (error) {
+            errors.push(`Failed to restore evaluation: ${error.message}`);
+          }
+        }
+      }
+      return {
+        success: true,
+        restoredCount,
+        errors,
+        message: `Successfully restored ${restoredCount} items from backup`
+      };
+    } catch (error) {
+      throw new TRPCError5({
+        code: "INTERNAL_SERVER_ERROR",
+        message: error.message || "Failed to restore from backup"
+      });
+    }
+  })
+});
+
 // server/routers.ts
 var appRouter = router({
   system: systemRouter,
+  admin: adminRouter,
+  analytics: analyticsRouter,
+  dataManagement: dataManagementRouter,
   /**
    * Authentication procedures
    */
@@ -751,14 +1458,14 @@ var appRouter = router({
      * Login with username and password
      */
     login: publicProcedure.input(
-      z2.object({
-        username: z2.string().min(1, "Username is required"),
-        password: z2.string().min(1, "Password is required")
+      z5.object({
+        username: z5.string().min(1, "Username is required"),
+        password: z5.string().min(1, "Password is required")
       })
     ).mutation(async ({ input, ctx }) => {
       const user = await authService.login(input.username, input.password, ctx.res);
       if (!user) {
-        throw new TRPCError3({
+        throw new TRPCError6({
           code: "UNAUTHORIZED",
           message: "Invalid username or password"
         });
@@ -785,16 +1492,16 @@ var appRouter = router({
      * Create a new user (admin only)
      */
     createUser: protectedProcedure.input(
-      z2.object({
-        username: z2.string().min(3, "Username must be at least 3 characters"),
-        password: z2.string().min(6, "Password must be at least 6 characters"),
-        name: z2.string().optional(),
-        email: z2.string().email().optional(),
-        role: z2.enum(["user", "admin", "facilitator"]).default("user")
+      z5.object({
+        username: z5.string().min(3, "Username must be at least 3 characters"),
+        password: z5.string().min(6, "Password must be at least 6 characters"),
+        name: z5.string().optional(),
+        email: z5.string().email().optional(),
+        role: z5.enum(["user", "admin", "facilitator"]).default("user")
       })
     ).mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") {
-        throw new TRPCError3({
+        throw new TRPCError6({
           code: "FORBIDDEN",
           message: "Only administrators can create users"
         });
@@ -818,7 +1525,7 @@ var appRouter = router({
           }
         };
       } catch (error) {
-        throw new TRPCError3({
+        throw new TRPCError6({
           code: "BAD_REQUEST",
           message: error instanceof Error ? error.message : "Failed to create user"
         });
@@ -833,19 +1540,19 @@ var appRouter = router({
      * Create a new evaluation
      */
     create: protectedProcedure.input(
-      z2.object({
-        sessionId: z2.number(),
-        groupId: z2.number(),
-        duringParticipation: z2.string().optional(),
-        beforeMixedInteractions: z2.number().optional(),
-        afterMixedInteractions: z2.number().optional(),
-        beforeStereotypes: z2.string().optional(),
-        afterStereotypes: z2.string().optional(),
-        notes: z2.string().optional()
+      z5.object({
+        sessionId: z5.number(),
+        groupId: z5.number(),
+        duringParticipation: z5.string().optional(),
+        beforeMixedInteractions: z5.number().optional(),
+        afterMixedInteractions: z5.number().optional(),
+        beforeStereotypes: z5.string().optional(),
+        afterStereotypes: z5.string().optional(),
+        notes: z5.string().optional()
       })
     ).mutation(async ({ input, ctx }) => {
       if (!ctx.user) {
-        throw new TRPCError3({ code: "UNAUTHORIZED" });
+        throw new TRPCError6({ code: "UNAUTHORIZED" });
       }
       const evaluation = await createEvaluation({
         sessionId: input.sessionId,
@@ -863,31 +1570,31 @@ var appRouter = router({
     /**
      * Get evaluations by group
      */
-    listByGroup: protectedProcedure.input(z2.object({ groupId: z2.number() })).query(async ({ input }) => {
+    listByGroup: protectedProcedure.input(z5.object({ groupId: z5.number() })).query(async ({ input }) => {
       return getEvaluationsByGroupId(input.groupId);
     }),
     /**
      * Get evaluations by session
      */
-    listBySession: protectedProcedure.input(z2.object({ sessionId: z2.number() })).query(async ({ input }) => {
+    listBySession: protectedProcedure.input(z5.object({ sessionId: z5.number() })).query(async ({ input }) => {
       return getEvaluationsBySessionId(input.sessionId);
     }),
     /**
      * Update an evaluation
      */
     update: protectedProcedure.input(
-      z2.object({
-        id: z2.number(),
-        duringParticipation: z2.string().optional(),
-        beforeMixedInteractions: z2.number().optional(),
-        afterMixedInteractions: z2.number().optional(),
-        beforeStereotypes: z2.string().optional(),
-        afterStereotypes: z2.string().optional(),
-        notes: z2.string().optional()
+      z5.object({
+        id: z5.number(),
+        duringParticipation: z5.string().optional(),
+        beforeMixedInteractions: z5.number().optional(),
+        afterMixedInteractions: z5.number().optional(),
+        beforeStereotypes: z5.string().optional(),
+        afterStereotypes: z5.string().optional(),
+        notes: z5.string().optional()
       })
     ).mutation(async ({ input, ctx }) => {
       if (!ctx.user) {
-        throw new TRPCError3({ code: "UNAUTHORIZED" });
+        throw new TRPCError6({ code: "UNAUTHORIZED" });
       }
       await updateEvaluation(input.id, {
         duringParticipation: input.duringParticipation,
@@ -902,9 +1609,9 @@ var appRouter = router({
     /**
      * Delete an evaluation
      */
-    delete: protectedProcedure.input(z2.object({ id: z2.number() })).mutation(async ({ input, ctx }) => {
+    delete: protectedProcedure.input(z5.object({ id: z5.number() })).mutation(async ({ input, ctx }) => {
       if (!ctx.user) {
-        throw new TRPCError3({ code: "UNAUTHORIZED" });
+        throw new TRPCError6({ code: "UNAUTHORIZED" });
       }
       await deleteEvaluation(input.id);
       return { success: true };
@@ -918,13 +1625,13 @@ var appRouter = router({
      * Create a new group
      */
     create: protectedProcedure.input(
-      z2.object({
-        name: z2.string().min(1, "Group name is required"),
-        description: z2.string().optional()
+      z5.object({
+        name: z5.string().min(1, "Group name is required"),
+        description: z5.string().optional()
       })
     ).mutation(async ({ input, ctx }) => {
       if (!ctx.user) {
-        throw new TRPCError3({ code: "UNAUTHORIZED" });
+        throw new TRPCError6({ code: "UNAUTHORIZED" });
       }
       const group = await createGroup({
         name: input.name,
@@ -942,7 +1649,7 @@ var appRouter = router({
     /**
      * Get a group by ID
      */
-    getById: protectedProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
+    getById: protectedProcedure.input(z5.object({ id: z5.number() })).query(async ({ input }) => {
       return getGroupById(input.id);
     })
   }),
@@ -954,17 +1661,17 @@ var appRouter = router({
      * Create a new session
      */
     create: protectedProcedure.input(
-      z2.object({
-        sessionNumber: z2.number(),
-        groupId: z2.number(),
-        date: z2.date(),
-        facilitator: z2.string().optional(),
-        topic: z2.string().optional(),
-        notes: z2.string().optional()
+      z5.object({
+        sessionNumber: z5.number(),
+        groupId: z5.number(),
+        date: z5.date(),
+        facilitator: z5.string().optional(),
+        topic: z5.string().optional(),
+        notes: z5.string().optional()
       })
     ).mutation(async ({ input, ctx }) => {
       if (!ctx.user) {
-        throw new TRPCError3({ code: "UNAUTHORIZED" });
+        throw new TRPCError6({ code: "UNAUTHORIZED" });
       }
       const session = await createSession({
         sessionNumber: input.sessionNumber,
@@ -979,7 +1686,7 @@ var appRouter = router({
     /**
      * Get sessions by group
      */
-    listByGroup: protectedProcedure.input(z2.object({ groupId: z2.number() })).query(async ({ input }) => {
+    listByGroup: protectedProcedure.input(z5.object({ groupId: z5.number() })).query(async ({ input }) => {
       return getSessionsByGroupId(input.groupId);
     })
   }),
@@ -991,16 +1698,16 @@ var appRouter = router({
      * Create a new material
      */
     create: protectedProcedure.input(
-      z2.object({
-        title: z2.string().min(1, "Title is required"),
-        description: z2.string().optional(),
-        category: z2.string().optional(),
-        url: z2.string().optional(),
-        fileKey: z2.string().optional()
+      z5.object({
+        title: z5.string().min(1, "Title is required"),
+        description: z5.string().optional(),
+        category: z5.string().optional(),
+        url: z5.string().optional(),
+        fileKey: z5.string().optional()
       })
     ).mutation(async ({ input, ctx }) => {
       if (!ctx.user) {
-        throw new TRPCError3({ code: "UNAUTHORIZED" });
+        throw new TRPCError6({ code: "UNAUTHORIZED" });
       }
       const material = await createMaterial({
         title: input.title,
@@ -1021,7 +1728,7 @@ var appRouter = router({
     /**
      * Get materials by category
      */
-    listByCategory: publicProcedure.input(z2.object({ category: z2.string() })).query(async ({ input }) => {
+    listByCategory: publicProcedure.input(z5.object({ category: z5.string() })).query(async ({ input }) => {
       return getMaterialsByCategory(input.category);
     })
   })

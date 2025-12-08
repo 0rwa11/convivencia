@@ -3,10 +3,16 @@ import { TRPCError } from "@trpc/server";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { authService } from "./_core/authService";
+import { adminRouter } from "./routers/admin";
+import { analyticsRouter } from "./routers/analytics";
+import { dataManagementRouter } from "./routers/dataManagement";
 import * as db from "./db";
 
 export const appRouter = router({
   system: systemRouter,
+  admin: adminRouter,
+  analytics: analyticsRouter,
+  dataManagement: dataManagementRouter,
 
   /**
    * Authentication procedures

@@ -1,6 +1,6 @@
-import { eq, and } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, evaluations, groups, sessions, materials, Evaluation, Group, Session, Material } from "../drizzle/schema";
+import { InsertUser, users, evaluations, groups, sessions, materials, auditLogs, Evaluation, Group, Session, Material, User } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -20,7 +20,7 @@ export async function getDb() {
 /**
  * User Management Functions
  */
-export async function createUser(user: InsertUser): Promise<void> {
+export async function createUser(user: InsertUser): Promise<User> {
   if (!user.username || !user.passwordHash) {
     throw new Error("Username and password hash are required");
   }
@@ -31,7 +31,10 @@ export async function createUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    await db.insert(users).values(user);
+    const result = await db.insert(users).values(user);
+    const userId = result[0].insertId as number;
+    const created = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    return created[0];
   } catch (error) {
     console.error("[Database] Failed to create user:", error);
     throw error;
@@ -70,6 +73,101 @@ export async function updateUserLastSignedIn(userId: number): Promise<void> {
     await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, userId));
   } catch (error) {
     console.error("[Database] Failed to update last signed in:", error);
+    throw error;
+  }
+}
+
+export async function getAllUsers(): Promise<User[]> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    return await db.select().from(users);
+  } catch (error) {
+    console.error("[Database] Failed to get all users:", error);
+    throw error;
+  }
+}
+
+export async function updateUser(
+  id: number,
+  updates: Partial<{
+    name: string | null;
+    email: string | null;
+    role: "admin" | "facilitator" | "user";
+    isActive: boolean;
+    passwordHash: string;
+  }>
+): Promise<User | undefined> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    await db.update(users).set(updates).where(eq(users.id, id));
+    return await getUserById(id);
+  } catch (error) {
+    console.error("[Database] Failed to update user:", error);
+    throw error;
+  }
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    await db.delete(users).where(eq(users.id, id));
+  } catch (error) {
+    console.error("[Database] Failed to delete user:", error);
+    throw error;
+  }
+}
+
+export async function getAuditLogs(limit: number = 100, offset: number = 0) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    return await db
+      .select()
+      .from(auditLogs)
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(limit)
+      .offset(offset);
+  } catch (error) {
+    console.error("[Database] Failed to get audit logs:", error);
+    throw error;
+  }
+}
+
+export async function getSystemStatistics() {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    const allUsers = await db.select().from(users);
+    const allEvaluations = await db.select().from(evaluations);
+    const allGroups = await db.select().from(groups);
+    const allSessions = await db.select().from(sessions);
+
+    return {
+      totalUsers: allUsers.length,
+      totalEvaluations: allEvaluations.length,
+      totalGroups: allGroups.length,
+      totalSessions: allSessions.length,
+    };
+  } catch (error) {
+    console.error("[Database] Failed to get statistics:", error);
     throw error;
   }
 }
@@ -196,6 +294,20 @@ export async function getEvaluationsBySessionId(sessionId: number) {
     return await db.select().from(evaluations).where(eq(evaluations.sessionId, sessionId));
   } catch (error) {
     console.error("[Database] Failed to get evaluations:", error);
+    throw error;
+  }
+}
+
+export async function listEvaluations() {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    return await db.select().from(evaluations);
+  } catch (error) {
+    console.error("[Database] Failed to list evaluations:", error);
     throw error;
   }
 }

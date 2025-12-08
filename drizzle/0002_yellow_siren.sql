@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` MODIFY COLUMN `facilitator` varchar(255);

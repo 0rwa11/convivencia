@@ -1,0 +1,52 @@
+<<<<<<< HEAD
+/* Target the error icon container specifically - hide elements with red color that are part of the error display */
+[class*="text-red-600"],
+[class*="text-destructive"],
+.text-red-600,
+.text-destructive {
+  display: none !important;
+}
+
+/* Hide the pink background circle behind the error icon */
+[class*="bg-red"],
+.bg-red-50,
+.bg-red-100 {
+  display: none !important;
+}
+
+/* Hide the 404 number - target the specific heading that contains it */
+/* This targets large numeric headings without affecting other content */
+h1:only-child,
+h2:only-child,
+h1[class*="text"],
+h2[class*="text"] {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  visibility: hidden !important;
+=======
+/* Hide the 404 error number and red icon */
+.text-red-600,
+.text-destructive,
+[class*="text-red"],
+svg.text-red-600,
+svg.text-destructive,
+.w-12.h-12.text-red-600,
+.w-12.h-12.text-destructive,
+.rounded-full.text-red-600,
+.rounded-full.text-destructive {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide any element containing "404" text */
+:has(> :contains("404")) {
+  display: none !important;
+>>>>>>> parent of 9b620da (Fix: Improve CSS rules to hide 404 text and red warning icon)
+}

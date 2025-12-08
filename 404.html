@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Convivencia - Programa de Convivencia Intercultural</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Lora:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="/convivencia/assets/index-D8oJVBHJ.js"></script>
+    <link rel="stylesheet" crossorigin href="/convivencia/assets/index-BMTqJVxt.css">
+    <link rel="stylesheet" href="/convivencia/assets/hide-error.css">
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script>
+      // Redirect root path to dashboard
+      if (window.location.pathname === '/convivencia/' || window.location.pathname === '/convivencia') {
+        window.location.href = '/convivencia/dashboard';
+      }
+    </script>
+    <script
+      defer
+      src="%VITE_ANALYTICS_ENDPOINT%/umami"
+      data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+  </body>
+
+</html>

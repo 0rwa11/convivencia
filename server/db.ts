@@ -1,5 +1,7 @@
 import { eq, desc, count } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import postgres from "postgres";
 import { InsertUser, users, evaluations, groups, sessions, materials, auditLogs, Evaluation, Group, Session, Material, User } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -8,7 +10,10 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const client = postgres(process.env.DATABASE_URL);
+      _db = drizzle(client);
+      // Force migration to run on startup for Render free tier compatibility
+      await migrate(_db, { migrationsFolder: "./drizzle" });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;

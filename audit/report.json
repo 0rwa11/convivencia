@@ -1,0 +1,40 @@
+{
+  "project_name": "convivencia_website",
+  "goal": "Rebuild the Convivencia website as a fully static, optimized application deployable on GitHub Pages, preserving all original features.",
+  "tech_stack": {
+    "frontend": "React (v19.1.1) with TypeScript (v5.9.3)",
+    "bundler": "Vite (v5.3.5)",
+    "styling": "Tailwind CSS (v4.1.14) with Radix UI components (Shadcn/ui style)",
+    "routing": "wouter (v3.3.5)",
+    "state_management": "React Context (EvaluationContext, ThemeContext, EnhancedNotificationContext)",
+    "data_persistence": "localStorage (for Evaluation records)",
+    "charting": "Recharts (v2.15.2)",
+    "pdf_generation": "jspdf (v3.0.4) and jspdf-autotable (v5.0.2)"
+  },
+  "architecture_audit": {
+    "original_architecture": "Full-stack scaffold (web-db-user) with Drizzle ORM, MySQL/TiDB dialect, and server-side components (server/ directory, drizzle.config.ts).",
+    "compiled_vs_source_diff": "The provided ZIP contains both the source code and a pre-compiled 'dist/public' directory. The source code is a full-stack project, but the client-side code (client/src) appears to be a fully functional React application that uses localStorage for data persistence (EvaluationContext.tsx). The server-side components (drizzle, server/) seem to be remnants of a full-stack template and are not actively used by the client-side application for core features like evaluation and statistics, which rely on localStorage.",
+    "backend_components_found": [
+      "drizzle.config.ts (MySQL/TiDB dialect)",
+      "drizzle/ (schema, migrations, relations)",
+      "server/ (various core files, trpc, db, storage, auth, etc.)"
+    ],
+    "static_compatibility_assessment": "The core application logic (Evaluation, Statistics, Calendar) is client-side and uses localStorage, making it highly compatible with a static architecture. The server-side components are vestigial and must be removed. The project is a full-stack template that was likely converted to a static app by removing server-side dependencies and relying on client-side storage.",
+    "data_persistence_method": "localStorage (Evaluation records, theme, etc.) - This is compatible with the static requirement."
+  },
+  "features_to_preserve": [
+    "Calendar (SessionCalendar.tsx)",
+    "Statistics (ComparisonCharts.tsx, GroupDashboard.tsx, ExecutiveSummary.tsx)",
+    "Evaluation tools (Evaluation.tsx, EvaluationTracking.tsx, EvaluationContext.tsx)",
+    "Import/Export of data (Logic likely within backupUtils.ts, which is missing, or implemented directly in EvaluationContext/pages using localStorage and file I/O, needs investigation)",
+    "Forms, UI pages, multilingual (i18n needs to be checked, but pages are present and use Spanish/Catalan routes)",
+    "Responsiveness (Tailwind CSS and Radix UI components suggest responsiveness is handled)"
+  ],
+  "issues_and_missing_features": [
+    "The `server/` directory and `drizzle` configuration must be removed to achieve a clean, fully static project.",
+    "The original `backupUtils.ts` and `cloudSync` files are missing, which may contain the original Import/Export logic. This logic must be reimplemented using client-side file I/O (JSON/CSV) to maintain feature parity.",
+    "Multilingual support (i18n) is not immediately obvious from the file structure (no dedicated i18n files/library config), but the routes are in Spanish. This needs to be implemented or confirmed if hardcoded.",
+    "The project uses `pnpm` and a `patches` directory, which suggests dependency issues were patched. This should be resolved by updating dependencies or finding a cleaner solution."
+  ],
+  "secrets_found": "No hardcoded secrets found in the initial audit of package.json and drizzle.config.ts. The server-side files that might contain secrets were not fully audited but will be removed."
+}

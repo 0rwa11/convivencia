@@ -3,81 +3,91 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Download, Upload, AlertCircle, CheckCircle } from 'lucide-react';
 import { useEvaluation } from '@/contexts/EvaluationContext';
+import {
+  exportToJSON,
+  exportToCSV,
+  downloadFile,
+  importFromJSON,
+  importFromCSV,
+  mergeRecords,
+  saveRecordsToStorage,
+} from '@/lib/dataExport';
 
+type MessageType = 'success' | 'error' | 'info';
+
+interface Message {
+  type: MessageType;
+  text: string;
+}
 
 export default function BackupRestore() {
   const { records } = useEvaluation();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<Message | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleExport = () => {
+  const showMessage = (type: MessageType, text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 5000);
+  };
+
+  const handleExportJSON = () => {
     try {
-      setIsLoading(true);
-      const backupData = {
-        timestamp: new Date().toISOString(),
-        evaluations: records,
-        version: '1.0',
-      };
-
-      const json = JSON.stringify(backupData, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `convivencia_backup_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      setMessage({
-        type: 'success',
-        text: `✅ Respaldo exportado exitosamente (${records.length} evaluaciones)`,
-      });
-      setTimeout(() => setMessage(null), 5000);
+      if (records.length === 0) {
+        showMessage('info', 'No evaluation records to export');
+        return;
+      }
+      const json = exportToJSON();
+      const timestamp = new Date().toISOString().split('T')[0];
+      downloadFile(json, `convivencia-evaluations-${timestamp}.json`, 'application/json');
+      showMessage('success', `Exported ${records.length} evaluation records to JSON`);
     } catch (error) {
-      setMessage({
-        type: 'error',
-        text: '❌ Error al exportar respaldo',
-      });
-    } finally {
-      setIsLoading(false);
+      showMessage('error', `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleExportCSV = () => {
+    try {
+      if (records.length === 0) {
+        showMessage('info', 'No evaluation records to export');
+        return;
+      }
+      const csv = exportToCSV();
+      const timestamp = new Date().toISOString().split('T')[0];
+      downloadFile(csv, `convivencia-evaluations-${timestamp}.csv`, 'text/csv');
+      showMessage('success', `Exported ${records.length} evaluation records to CSV`);
+    } catch (error) {
+      showMessage('error', `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      const text = await file.text();
-      const backupData = JSON.parse(text);
+      let importedRecords;
 
-      if (!backupData.evaluations || !Array.isArray(backupData.evaluations)) {
-        throw new Error('Formato de archivo inválido');
+      if (file.name.endsWith('.json')) {
+        importedRecords = await importFromJSON(file);
+      } else if (file.name.endsWith('.csv')) {
+        importedRecords = await importFromCSV(file);
+      } else {
+        throw new Error('Unsupported file format. Please use JSON or CSV.');
       }
 
-      // Save to localStorage
-      localStorage.setItem('convivencia_evaluations', JSON.stringify(backupData.evaluations));
-      
+      const merged = mergeRecords(records, importedRecords);
+      saveRecordsToStorage(merged);
 
-
-      setMessage({
-        type: 'success',
-        text: `✅ Respaldo importado exitosamente (${backupData.evaluations.length} evaluaciones)`,
-      });
-
-      // Reload page to show new data
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      showMessage('success', `Imported ${importedRecords.length} evaluation records. Reloading...`);
+      setTimeout(() => window.location.reload(), 2000);
     } catch (error) {
-      setMessage({
-        type: 'error',
-        text: `❌ Error al importar: ${error instanceof Error ? error.message : 'Archivo inválido'}`,
-      });
+      showMessage('error', `Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsLoading(false);
       if (fileInputRef.current) {
@@ -86,101 +96,91 @@ export default function BackupRestore() {
     }
   };
 
-  const lastSyncTime = null;
-  const storageSize = 0;
-
   return (
-    <div className="space-y-4">
-      {/* Messages */}
-      {message && (
-        <div
-          className={`flex items-center gap-3 p-4 rounded-lg ${
-            message.type === 'success'
-              ? 'bg-green-50 border border-green-200 text-green-700'
-              : 'bg-red-50 border border-red-200 text-red-700'
-          }`}
-        >
-          {message.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 flex-shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-          )}
-          <span className="text-sm">{message.text}</span>
+    <div className="space-y-6">
+      <Card className="p-6 border-0 shadow-sm">
+        <h2 className="text-2xl font-bold mb-4">Data Backup & Restore</h2>
+        
+        {message && (
+          <div className={`mb-4 p-4 rounded-lg flex items-start gap-3 ${
+            message.type === 'success' ? 'bg-green-50 text-green-900' :
+            message.type === 'error' ? 'bg-red-50 text-red-900' :
+            'bg-blue-50 text-blue-900'
+          }`}>
+            {message.type === 'success' && <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
+            {message.type === 'error' && <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
+            {message.type === 'info' && <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
+            <p className="text-sm">{message.text}</p>
+          </div>
+        )}
+
+        <div className="space-y-6">
+          <div>
+            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Download className="w-5 h-5" />
+              Export Data
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Download your evaluation records as a backup. Current records: <strong>{records.length}</strong>
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={handleExportJSON}
+                variant="outline"
+                className="flex-1"
+                disabled={records.length === 0}
+              >
+                Export as JSON
+              </Button>
+              <Button
+                onClick={handleExportCSV}
+                variant="outline"
+                className="flex-1"
+                disabled={records.length === 0}
+              >
+                Export as CSV
+              </Button>
+            </div>
+          </div>
+
+          <div className="border-t pt-6">
+            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Upload className="w-5 h-5" />
+              Import Data
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Upload a JSON or CSV file to restore or merge evaluation records. Existing records with the same ID will be updated.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={handleImportClick}
+                variant="default"
+                className="flex-1"
+                disabled={isLoading}
+              >
+                {isLoading ? 'Importing...' : 'Choose File to Import'}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.csv"
+                onChange={handleFileSelect}
+                className="hidden"
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+
+          <div className="border-t pt-6 bg-blue-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-sm mb-2">Info: How it works</h4>
+            <ul className="text-sm text-muted-foreground space-y-1">
+              <li>• <strong>Export:</strong> Creates a backup file of all your evaluation records</li>
+              <li>• <strong>Import:</strong> Restores records from a backup or merges new records</li>
+              <li>• <strong>Formats:</strong> JSON for full data preservation, CSV for spreadsheet compatibility</li>
+              <li>• <strong>Storage:</strong> All data is stored locally in your browser</li>
+            </ul>
+          </div>
         </div>
-      )}
-
-      {/* Export Section */}
-      <Card className="p-6 bg-card">
-        <h3 className="text-lg font-semibold text-foreground mb-2">📥 Exportar Respaldo</h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Descarga todos tus datos como archivo JSON. Puedes importarlo en otro dispositivo.
-        </p>
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={handleExport}
-            disabled={isLoading || records.length === 0}
-            className="bg-primary hover:bg-primary/90 text-white flex items-center gap-2"
-          >
-            <Download className="w-4 h-4" />
-            Descargar Respaldo
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            {records.length} evaluaciones
-          </span>
-        </div>
-      </Card>
-
-      {/* Import Section */}
-      <Card className="p-6 bg-card">
-        <h3 className="text-lg font-semibold text-foreground mb-2">📤 Importar Respaldo</h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Sube un archivo JSON de respaldo anterior para restaurar tus datos.
-        </p>
-        <div className="flex items-center gap-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleImport}
-            disabled={isLoading}
-            className="hidden"
-          />
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <Upload className="w-4 h-4" />
-            Seleccionar Archivo
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Formato: .json
-          </span>
-        </div>
-      </Card>
-
-      {/* Info Section */}
-	      <Card className="p-6 bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
-	        <h3 className="text-lg font-semibold text-foreground mb-3">ℹ️ Información de Datos Locales</h3>
-	        <div className="space-y-2 text-sm">
-	          <div className="flex justify-between">
-	            <span className="text-muted-foreground">Total de evaluaciones:</span>
-	            <span className="font-medium text-foreground">{records.length}</span>
-	          </div>
-	        </div>
-	      </Card>
-
-      {/* Instructions */}
-      <Card className="p-6 bg-card">
-        <h3 className="text-lg font-semibold text-foreground mb-3">📋 Instrucciones</h3>
-        <ol className="space-y-2 text-sm text-foreground list-decimal list-inside">
-          <li>Usa <strong>"Descargar Respaldo"</strong> para guardar tus datos en tu computadora</li>
-          <li>En otro dispositivo, ve a esta página y usa <strong>"Seleccionar Archivo"</strong></li>
-          <li>Sube el archivo JSON que descargaste</li>
-          <li>Tus datos se importarán automáticamente</li>
-          <li>La página se recargará para mostrar los nuevos datos</li>
-        </ol>
       </Card>
     </div>
   );
